@@ -43,29 +43,54 @@ Module Module1
 
         _Doc = _invApp.ActiveDocument
         _CompDef = _Doc.ComponentDefinition
-        AssociativeBodyCopy()
         FindCutObjects()
+
+        AssociativeBodyCopy()
+
 
 
     End Sub
 
     Private Sub FindCutObjects()
-        Dim oDoc As Document
-        For Each oDoc In _Doc.AllReferencedDocuments
+
+        ' Get all of the leaf occurrences of the assembly. 
+        Dim oLeafOccs As ComponentOccurrencesEnumerator
+        oLeafOccs = _CompDef.Occurrences.AllLeafOccurrences
+
+
+        ' Iterate through the occurrences and print the name. 
+        Dim oOcc As ComponentOccurrence
+        For Each oOcc In oLeafOccs
+
             ' Check to see if this is a part. 
-            If oDoc.DocumentType = DocumentTypeEnum.kPartDocumentObject Then
+            If oOcc.DefinitionDocumentType = DocumentTypeEnum.kPartDocumentObject Then
                 Dim oPartDoc As PartDocument
-                oPartDoc = oDoc
-                If GetCustomPropertyValue(oDoc, "Cut") = "True" Then
-                    MsgBox(oDoc.DisplayName)
+                oPartDoc = oOcc.ReferencedDocumentDescriptor.ReferencedDocument
+                If GetCustomPropertyValue(oPartDoc, "CutAdd") = "True" Then
+                    'MsgBox(oPartDoc.DisplayName)
+                    CheckInterference(oOcc)
                 End If
             End If
         Next
 
     End Sub
 
-    Private Sub CheckInterference()
+    Private Sub CheckInterference(ByVal AddCutBody As ComponentOccurrence)
 
+        'Add all occurences to a collecion
+        Dim CheckSet As ObjectCollection = _invApp.TransientObjects.CreateObjectCollection
+
+        For Each Occ As ComponentOccurrence In _Doc.ComponentDefinition.Occurrences
+            CheckSet.Add(Occ)
+        Next
+
+        'Check for interference
+        Dim InterResults As InterferenceResults
+        InterResults = _Doc.ComponentDefinition.AnalyzeInterference(CheckSet)
+
+        If InterResults.Count >= 1 Then
+
+        End If
     End Sub
 
     Sub AssociativeBodyCopy()
