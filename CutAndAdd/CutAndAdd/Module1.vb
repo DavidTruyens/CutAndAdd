@@ -1,10 +1,7 @@
-﻿Imports System
-Imports System.Type
+﻿Imports System.Type
 Imports System.Activator
-Imports System.Threading
 Imports System.Runtime.InteropServices
 Imports Inventor
-Imports System.IO
 
 Module Module1
     Public _invApp As Inventor.Application
@@ -43,12 +40,41 @@ Module Module1
 
         _Doc = _invApp.ActiveDocument
         _CompDef = _Doc.ComponentDefinition
+
+        RemoveCutAddOperations()
         FindCutObjects()
 
-        AssociativeBodyCopy()
+    End Sub
 
+    Private Sub RemoveCutAddOperations()
+        ' Get all of the leaf occurrences of the assembly. 
+        Dim oLeafOccs As ComponentOccurrencesEnumerator
+        oLeafOccs = _CompDef.Occurrences.AllLeafOccurrences
 
+        ' Iterate through the occurrences and print the name. 
+        Dim oOcc As ComponentOccurrence
+        For Each oOcc In oLeafOccs
+            ' Check to see if this is a part. 
+            If oOcc.DefinitionDocumentType = DocumentTypeEnum.kPartDocumentObject Then
+                Dim oPartDoc As PartDocument
+                oPartDoc = oOcc.ReferencedDocumentDescriptor.ReferencedDocument
 
+                If GetCustomPropertyValue(oPartDoc, "CutAddTarget") = "True" Then
+                    For Each oFeature As Object In oPartDoc.ComponentDefinition.Features
+                        If oFeature.Name = "Cuttool" Or oFeature.Name = "Addtool" Then
+                            oFeature.Delete()
+                        End If
+                    Next
+
+                    For Each obody As Object In oPartDoc.ComponentDefinition.Features
+                        If obody.Name = "Cut" Or obody.Name = "Add" Then
+                            obody.Delete()
+                        End If
+                    Next
+
+                End If
+            End If
+        Next
     End Sub
 
     Private Sub FindCutObjects()
@@ -57,17 +83,15 @@ Module Module1
         Dim oLeafOccs As ComponentOccurrencesEnumerator
         oLeafOccs = _CompDef.Occurrences.AllLeafOccurrences
 
-
         ' Iterate through the occurrences and print the name. 
         Dim oOcc As ComponentOccurrence
         For Each oOcc In oLeafOccs
-
             ' Check to see if this is a part. 
             If oOcc.DefinitionDocumentType = DocumentTypeEnum.kPartDocumentObject Then
                 Dim oPartDoc As PartDocument
                 oPartDoc = oOcc.ReferencedDocumentDescriptor.ReferencedDocument
                 If GetCustomPropertyValue(oPartDoc, "CutAdd") = "True" Then
-                    'MsgBox(oPartDoc.DisplayName)
+                    Debug.Print(oPartDoc.DisplayName)
                     CheckInterference(oOcc)
                 End If
             End If
@@ -79,32 +103,63 @@ Module Module1
 
         'Add all occurences to a collecion
         Dim CheckSet As ObjectCollection = _invApp.TransientObjects.CreateObjectCollection
+        Dim OtherOcc As ObjectCollection = _invApp.TransientObjects.CreateObjectCollection
+
+        CheckSet.Add(AddCutBody)
 
         For Each Occ As ComponentOccurrence In _Doc.ComponentDefinition.Occurrences
-            CheckSet.Add(Occ)
+            If Not AddCutBody Is Occ Then
+                OtherOcc.Add(Occ)
+            End If
         Next
 
         'Check for interference
         Dim InterResults As InterferenceResults
-        InterResults = _Doc.ComponentDefinition.AnalyzeInterference(CheckSet)
+        InterResults = _Doc.ComponentDefinition.AnalyzeInterference(CheckSet, OtherOcc)
 
-        If InterResults.Count >= 1 Then
+        If InterResults.Count = 1 Then
+            Debug.Print(InterResults.Count)
+            CutandAdd(InterResults.Item(1).OccurrenceOne, InterResults.Item(1).OccurrenceTwo)
+        ElseIf InterResults.Count > 1 Then
+            MsgBox("Multiple intersections found...")
+        Else
+            MsgBox("No intersections found...")
 
         End If
     End Sub
 
-    Sub AssociativeBodyCopy()
+    Sub CutandAdd(ByVal CutAddOcc As ComponentOccurrence, ByVal TargetOcc As ComponentOccurrence)
 
-        ' Select the body to copy.  This will be a proxy since it's 
-        ' being selected in the context of the assembly. 
-        Dim sourceBody As SurfaceBodyProxy
-        sourceBody = _invApp.CommandManager.Pick(SelectionFilterEnum.kPartBodyFilter, "Select a body to copy.")
+        For Each body As SurfaceBody In CutAddOcc.SurfaceBodies
+            If body.Name = "Cut" Or body.Name = "Add" Then
+                CopyBody(body, TargetOcc)
+                AddProperty(TargetOcc)
+            End If
+        Next
 
-        ' Get the occurrence to create the new body within. 
-        Dim targetOcc As ComponentOccurrence
-        targetOcc = _invApp.CommandManager.Pick(SelectionFilterEnum.kAssemblyLeafOccurrenceFilter, "Select an occurrence to copy the body into.")
+    End Sub
+
+    Sub CopyBody(ByVal sourcebody As SurfaceBody, ByVal targetocc As ComponentOccurrence)
+
         Dim targetDef As PartComponentDefinition
-        targetDef = targetOcc.Definition
+        targetDef = targetocc.Definition
+        ' The selected body is a body proxy in the context of   
+        ' the assembly. However, there's a problem with the
+        ' TransientBrep.Copy method and it creates a copy of the 
+        ' body that ignores the transorm.  The code below creates 
+        ' the copy and then performs an extra step to apply the 
+        ' transform. 
+        Dim newBody As SurfaceBody
+        newBody = _invApp.TransientBRep.Copy(sourcebody)
+        Call _invApp.TransientBRep.Transform(newBody,
+             sourcebody.ContainingOccurrence.Transformation)
+
+        ' Transform the body into the parts space of the 
+        ' target occurrence. 
+        Dim trans As Matrix
+        trans = targetocc.Transformation
+        trans.Invert()
+        Call _invApp.TransientBRep.Transform(newBody, trans)
 
         ' Create a base feature definition.  This is used to define the 
         ' various inputs needed to create a base feature. 
@@ -116,76 +171,47 @@ Module Module1
         transObjs = _invApp.TransientObjects
         Dim col As ObjectCollection
 
-        ' Ask if an associative or non-associative copy should be made. 
-        Dim answer As MsgBoxResult
-        answer = MsgBox("Choose the type of copy to create." &
-                    vbCrLf & vbCrLf &
-                    "   Yes - Associative surface" & vbCrLf &
-                    "   No - Non-associative solid", vbYesNoCancel)
-        If answer = vbYes Then
-            ' Define the geometry to be copied.  In this case, 
-            ' it's the selected body. 
-            col = transObjs.CreateObjectCollection
-            col.Add(sourceBody)
+        col = transObjs.CreateObjectCollection
+        col.Add(newBody)
 
-            ' This creates an associative copy of the model.  To 
-            ' create an associative copy inventor only supports creating 
-            ' a surface of composite result, not a solid. 
-            featureDef.BRepEntities = col
-            featureDef.OutputType = BaseFeatureOutputTypeEnum.kSurfaceOutputType
-            featureDef.TargetOccurrence = targetOcc
-            featureDef.IsAssociative = True
+        ' This creates an non-associative copy that is a solid. 
+        featureDef.BRepEntities = col
+        featureDef.OutputType = BaseFeatureOutputTypeEnum.kSolidOutputType
+        featureDef.TargetOccurrence = targetocc
+        featureDef.IsAssociative = False
 
-            Dim baseFeature As NonParametricBaseFeature
-            baseFeature = nonPrmFeatures.AddByDefinition(featureDef)
-        ElseIf answer = vbNo Then
-            ' The selected body is a body proxy in the context of   
-            ' the assembly. However, there's a problem with the
-            ' TransientBrep.Copy method and it creates a copy of the 
-            ' body that ignores the transorm.  The code below creates 
-            ' the copy and then performs an extra step to apply the 
-            ' transform. 
-            Dim newBody As SurfaceBody
-            newBody = _invApp.TransientBRep.Copy(sourceBody)
-            Call _invApp.TransientBRep.Transform(newBody,
-             sourceBody.ContainingOccurrence.Transformation)
+        nonPrmFeatures.AddByDefinition(featureDef)
+        targetDef.Features.Item(targetDef.Features.Count).Name = sourcebody.Name
 
-            ' Transform the body into the parts space of the 
-            ' target occurrence. 
-            Dim trans As Matrix
-            trans = targetOcc.Transformation
-            trans.Invert()
-            Call _invApp.TransientBRep.Transform(newBody, trans)
-
-            col = transObjs.CreateObjectCollection
-            col.Add(newBody)
-
-            ' This creates an non-associative copy that is a solid. 
-            featureDef.BRepEntities = col
-            featureDef.OutputType = BaseFeatureOutputTypeEnum.kSolidOutputType
-            featureDef.TargetOccurrence = targetOcc
-            featureDef.IsAssociative = False
-
-            nonPrmFeatures.AddByDefinition(featureDef)
-
+        Dim cutoradd As PartFeatureOperationEnum
+        If sourcebody.Name = "Cut" Then
+            cutoradd = PartFeatureOperationEnum.kCutOperation
+        Else
+            cutoradd = PartFeatureOperationEnum.kJoinOperation
         End If
+
+        Dim toolcol As ObjectCollection = _invApp.TransientObjects.CreateObjectCollection
+        toolcol.Add(targetDef.SurfaceBodies.Item(2))
+
+        targetDef.Features.CombineFeatures.Add(targetDef.SurfaceBodies.Item(1), toolcol, cutoradd)
+        targetDef.Features.Item(targetDef.Features.Count).Name = sourcebody.Name & "tool"
+
     End Sub
 
-    Sub RunSculptDemo()
-        'reference to the part document
-        Dim oDoc As PartDocument = TryCast(_invApp.ActiveDocument, PartDocument)
-        If oDoc Is Nothing Then Exit Sub
-        Dim oDef As PartComponentDefinition = oDoc.ComponentDefinition
+    Sub AddProperty(ByVal ComponentOcc As ComponentOccurrence)
 
-        'features collection
-        Dim oFeatures As PartFeatures = oDef.Features
-        'surfaces collection
-        Dim oSurfaces As ObjectCollection = _invApp.TransientObjects.CreateObjectCollection()
-        For Each osurface As WorkSurface In oDef.WorkSurfaces
-            oSurfaces.Add(oFeatures.SculptFeatures.CreateSculptSurface(osurface, PartFeatureExtentDirectionEnum.kNegativeExtentDirection))
-        Next
-        'create sculpt feature
-        Dim oSculpt As SculptFeature = oFeatures.SculptFeatures.Add(oSurfaces, PartFeatureOperationEnum.kCutOperation)
+        Dim doc As PartDocument = ComponentOcc.ReferencedDocumentDescriptor.ReferencedDocument
+
+        If Not GetCustomPropertyValue(doc, "CutAddTarget") = "True" Then
+            Dim customPropSet As PropertySet
+            customPropSet = doc.PropertySets.Item("Inventor User Defined Properties")
+
+            ' Create a new boolean property. 
+            Dim yesNoValue As Boolean
+            yesNoValue = True
+            customPropSet.Add(yesNoValue, "CutAddTarget")
+        End If
+
     End Sub
 
     Private Function GetCustomPropertyValue(ByVal oDocument As Inventor.Document, ByVal PropertyName As String) As String
