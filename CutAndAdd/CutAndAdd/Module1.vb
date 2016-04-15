@@ -61,13 +61,13 @@ Module Module1
 
                 If GetCustomPropertyValue(oPartDoc, "CutAddTarget") = "True" Then
                     For Each oFeature As Object In oPartDoc.ComponentDefinition.Features
-                        If oFeature.Name = "Cuttool" Or oFeature.Name = "Addtool" Then
+                        If oFeature.Name.contains("Cuttool") Or oFeature.Name.contains("Addtool") Then
                             oFeature.Delete()
                         End If
                     Next
 
                     For Each obody As Object In oPartDoc.ComponentDefinition.Features
-                        If obody.Name = "Cut" Or obody.Name = "Add" Then
+                        If obody.Name.contains("Cut") Or obody.Name.contains("Add") Then
                             obody.Delete()
                         End If
                     Next
@@ -100,6 +100,8 @@ Module Module1
     End Sub
 
     Private Sub CheckInterference(ByVal AddCutBody As ComponentOccurrence)
+        'Make sure the body is visible
+        AddCutBody.Visible = True
 
         'Add all occurences to a collecion
         Dim CheckSet As ObjectCollection = _invApp.TransientObjects.CreateObjectCollection
@@ -121,11 +123,13 @@ Module Module1
             Debug.Print(InterResults.Count)
             CutandAdd(InterResults.Item(1).OccurrenceOne, InterResults.Item(1).OccurrenceTwo)
         ElseIf InterResults.Count > 1 Then
+
             MsgBox("Multiple intersections found...")
         Else
             MsgBox("No intersections found...")
-
         End If
+
+        AddCutBody.Visible = False
     End Sub
 
     Sub CutandAdd(ByVal CutAddOcc As ComponentOccurrence, ByVal TargetOcc As ComponentOccurrence)
@@ -181,20 +185,38 @@ Module Module1
         featureDef.IsAssociative = False
 
         nonPrmFeatures.AddByDefinition(featureDef)
-        targetDef.Features.Item(targetDef.Features.Count).Name = sourcebody.Name
+        ' Get operation number
+        Dim iCut As Integer = 1
+        Dim iAdd As Integer = 1
+        For Each oFeature As Object In targetDef.Features
+            Dim featurename As String = oFeature.name
+
+            If featurename.Contains("Cut") Then
+                iCut = iCut + 1
+            ElseIf featurename.Contains("Add") Then
+                iAdd = iAdd + 1
+            End If
+        Next
 
         Dim cutoradd As PartFeatureOperationEnum
         If sourcebody.Name = "Cut" Then
             cutoradd = PartFeatureOperationEnum.kCutOperation
+            targetDef.Features.Item(targetDef.Features.Count).Name = sourcebody.Name & iCut
         Else
             cutoradd = PartFeatureOperationEnum.kJoinOperation
+            targetDef.Features.Item(targetDef.Features.Count).Name = sourcebody.Name & iAdd
         End If
 
         Dim toolcol As ObjectCollection = _invApp.TransientObjects.CreateObjectCollection
         toolcol.Add(targetDef.SurfaceBodies.Item(2))
 
         targetDef.Features.CombineFeatures.Add(targetDef.SurfaceBodies.Item(1), toolcol, cutoradd)
-        targetDef.Features.Item(targetDef.Features.Count).Name = sourcebody.Name & "tool"
+        If sourcebody.Name = "Cut" Then
+            targetDef.Features.Item(targetDef.Features.Count).Name = sourcebody.Name & "tool" & iCut
+        Else
+            targetDef.Features.Item(targetDef.Features.Count).Name = sourcebody.Name & "tool" & iAdd
+        End If
+
 
     End Sub
 
