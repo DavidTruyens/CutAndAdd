@@ -122,9 +122,12 @@ Module Module1
         If InterResults.Count = 1 Then
             Debug.Print(InterResults.Count)
             CutandAdd(InterResults.Item(1).OccurrenceOne, InterResults.Item(1).OccurrenceTwo)
-        ElseIf InterResults.Count > 1 Then
-
-            MsgBox("Multiple intersections found...")
+        ElseIf InterResults.Count = 2 Then
+            If InterResults.Item(1).OccurrenceTwo.Name = InterResults.Item(2).OccurrenceTwo.Name Then
+                CutandAdd(InterResults.Item(1).OccurrenceOne, InterResults.Item(1).OccurrenceTwo)
+            Else
+                MsgBox("Multiple intersections found...")
+            End If
         Else
             MsgBox("No intersections found...")
         End If
@@ -135,7 +138,14 @@ Module Module1
     Sub CutandAdd(ByVal CutAddOcc As ComponentOccurrence, ByVal TargetOcc As ComponentOccurrence)
 
         For Each body As SurfaceBody In CutAddOcc.SurfaceBodies
-            If body.Name = "Cut" Or body.Name = "Add" Then
+            If body.Name = "Cut" Then
+                CopyBody(body, TargetOcc)
+                AddProperty(TargetOcc)
+            End If
+        Next
+
+        For Each body As SurfaceBody In CutAddOcc.SurfaceBodies
+            If body.Name = "Add" Then
                 CopyBody(body, TargetOcc)
                 AddProperty(TargetOcc)
             End If
