@@ -218,15 +218,21 @@ Module Module1
         End If
 
         Dim toolcol As ObjectCollection = _invApp.TransientObjects.CreateObjectCollection
-        toolcol.Add(targetDef.SurfaceBodies.Item(2))
+        toolcol.Add(targetDef.SurfaceBodies.Item(targetDef.SurfaceBodies.Count))
 
-        targetDef.Features.CombineFeatures.Add(targetDef.SurfaceBodies.Item(1), toolcol, cutoradd)
-        If sourcebody.Name = "Cut" Then
-            targetDef.Features.Item(targetDef.Features.Count).Name = sourcebody.Name & "tool" & iCut
-        Else
-            targetDef.Features.Item(targetDef.Features.Count).Name = sourcebody.Name & "tool" & iAdd
-        End If
-
+        Dim Numberofbodies As Integer = targetDef.SurfaceBodies.Count - 1
+        For i As Integer = 1 To Numberofbodies
+            Try
+                targetDef.Features.CombineFeatures.Add(targetDef.SurfaceBodies.Item(i), toolcol, cutoradd)
+                If sourcebody.Name = "Cut" Then
+                    targetDef.Features.Item(targetDef.Features.Count).Name = sourcebody.Name & "tool" & iCut
+                Else
+                    targetDef.Features.Item(targetDef.Features.Count).Name = sourcebody.Name & "tool" & iAdd
+                End If
+            Catch ex As Exception
+                Debug.Print("Body " & i & " failed")
+            End Try
+        Next
 
     End Sub
 
