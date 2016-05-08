@@ -9,6 +9,11 @@ Module Module1
     Dim _OrigDoc As Inventor.PartDocument
     Dim _started As Boolean = False
     Dim _CompDef As AssemblyComponentDefinition
+    Dim _CutCounter As Integer = 0
+    Dim _AddCounter As Integer = 0
+    Dim _CutRemove As Integer = 0
+    Dim _AddRemove As Integer = 0
+
 
     Public Sub Main()
 
@@ -42,8 +47,9 @@ Module Module1
         _CompDef = _Doc.ComponentDefinition
 
         RemoveCutAddOperations()
+        _Doc.Update()
         FindCutObjects()
-
+        MsgBox(_CutRemove & " previous cut " & _AddRemove & " previous add operations have been removed" & vbNewLine & vbNewLine & _CutCounter & " cut operations and " & _AddCounter & " add operations have been created")
     End Sub
 
     Private Sub RemoveCutAddOperations()
@@ -53,6 +59,7 @@ Module Module1
 
         ' Iterate through the occurrences and print the name. 
         Dim oOcc As ComponentOccurrence
+        Dim msgboxtest As Boolean = True
         For Each oOcc In oLeafOccs
             ' Check to see if this is a part. 
             If oOcc.DefinitionDocumentType = DocumentTypeEnum.kPartDocumentObject Then
@@ -60,9 +67,21 @@ Module Module1
                 oPartDoc = oOcc.ReferencedDocumentDescriptor.ReferencedDocument
 
                 If GetCustomPropertyValue(oPartDoc, "CutAddTarget") = "True" Then
-                    For Each oFeature As Object In oPartDoc.ComponentDefinition.Features
-                        If oFeature.Name.contains("Cuttool") Or oFeature.Name.contains("Addtool") Then
+                    If msgboxtest Then
+                        Dim Removebox = MsgBox("Would you like to remove previous Cut-Add operations?", MsgBoxStyle.YesNo, "Cut Add")
+                        If Removebox = DialogResult.No Then
+                            Exit Sub
+                        End If
+                        msgboxtest = False
+
+                    End If
+                        For Each oFeature As Object In oPartDoc.ComponentDefinition.Features
+                        If oFeature.Name.contains("Cuttool") Then
                             oFeature.Delete()
+                            _CutRemove = _CutRemove + 1
+                        ElseIf oFeature.Name.contains("Addtool") Then
+                            oFeature.Delete()
+                            _AddRemove = _AddRemove + 1
                         End If
                     Next
 
@@ -71,6 +90,9 @@ Module Module1
                             obody.Delete()
                         End If
                     Next
+
+                    Dim CutAddProp As Boolean = False
+                    UpdateCustomiProperty(oPartDoc, "CutAddTarget", CutAddProp)
 
                 End If
             End If
@@ -83,6 +105,8 @@ Module Module1
         Dim oLeafOccs As ComponentOccurrencesEnumerator
         oLeafOccs = _CompDef.Occurrences.AllLeafOccurrences
 
+        Dim msgboxtest As Boolean = True
+
         ' Iterate through the occurrences and print the name. 
         Dim oOcc As ComponentOccurrence
         For Each oOcc In oLeafOccs
@@ -91,6 +115,14 @@ Module Module1
                 Dim oPartDoc As PartDocument
                 oPartDoc = oOcc.ReferencedDocumentDescriptor.ReferencedDocument
                 If GetCustomPropertyValue(oPartDoc, "CutAdd") = "True" Then
+                    If msgboxtest Then
+                        Dim Removebox = MsgBox("Cut objects found, would you like to create them?", MsgBoxStyle.YesNo, "Cut Add")
+                        If Removebox = DialogResult.No Then
+                            Exit Sub
+                        End If
+
+                        msgboxtest = False
+                    End If
                     Debug.Print(oPartDoc.DisplayName)
                     CheckInterference(oOcc)
                 End If
@@ -140,14 +172,18 @@ Module Module1
         For Each body As SurfaceBody In CutAddOcc.SurfaceBodies
             If body.Name = "Cut" Then
                 CopyBody(body, TargetOcc)
-                AddProperty(TargetOcc)
+                Dim cutaddvalue As Boolean = True
+                UpdateCustomiProperty(TargetOcc.Definition.Document, "CutAddTarget", cutaddvalue)
+                _CutCounter = _CutCounter + 1
             End If
         Next
 
         For Each body As SurfaceBody In CutAddOcc.SurfaceBodies
             If body.Name = "Add" Then
                 CopyBody(body, TargetOcc)
-                AddProperty(TargetOcc)
+                Dim cutaddvalue As Boolean = True
+                UpdateCustomiProperty(TargetOcc.Definition.Document, "CutAddTarget", cutaddvalue)
+                _AddCounter = _AddCounter + 1
             End If
         Next
 
@@ -237,22 +273,6 @@ Module Module1
 
     End Sub
 
-    Sub AddProperty(ByVal ComponentOcc As ComponentOccurrence)
-
-        Dim doc As PartDocument = ComponentOcc.ReferencedDocumentDescriptor.ReferencedDocument
-
-        If Not GetCustomPropertyValue(doc, "CutAddTarget") = "True" Then
-            Dim customPropSet As PropertySet
-            customPropSet = doc.PropertySets.Item("Inventor User Defined Properties")
-
-            ' Create a new boolean property. 
-            Dim yesNoValue As Boolean
-            yesNoValue = True
-            customPropSet.Add(yesNoValue, "CutAddTarget")
-        End If
-
-    End Sub
-
     Private Function GetCustomPropertyValue(ByVal oDocument As Inventor.Document, ByVal PropertyName As String) As String
         Dim Result As String = Nothing
         Try
@@ -268,5 +288,29 @@ Module Module1
         End Try
         Return Result
     End Function
+
+    Private Sub UpdateCustomiProperty(ByRef Doc As Document, ByRef PropertyName As String, ByRef PropertyValue As Object)
+        ' Get the custom property set. 
+        Dim customPropSet As Inventor.PropertySet
+        customPropSet = Doc.PropertySets.Item("Inventor User Defined Properties")
+
+        ' Get the existing property, if it exists. 
+        Dim prop As Inventor.Property = Nothing
+        Dim propExists As Boolean = True
+        Try
+            prop = customPropSet.Item(PropertyName)
+        Catch ex As Exception
+            propExists = False
+        End Try
+
+        ' Check to see if the property was successfully obtained. 
+        If Not propExists Then
+            ' Failed to get the existing property so create a new one. 
+            prop = customPropSet.Add(PropertyValue, PropertyName)
+        Else
+            ' Change the value of the existing property. 
+            prop.Value = PropertyValue
+        End If
+    End Sub
 
 End Module
