@@ -229,6 +229,7 @@ Module Module1
                 Else
                     targetDef.Features.Item(targetDef.Features.Count).Name = sourcebody.Name & "tool" & iAdd
                 End If
+                Debug.Print("Body " & i & " succeded")
             Catch ex As Exception
                 Debug.Print("Body " & i & " failed")
             End Try
